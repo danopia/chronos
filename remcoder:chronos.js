@@ -2,26 +2,59 @@ var _timers = {};
 
 function Timer(interval) {
   this.interval = interval || 1000;
-  this.time = new ReactiveVar(0);  
+  this.time = new ReactiveVar(0);
 }
 
 Timer.prototype.start = function() {
   if (this._timer) throw new Error('Trying to start Chronos.Timer but it is already running.');
-  this.time.set(new Date());
-
-
-  this._timer = setInterval(Meteor.bindEnvironment(function() {
-    //console.log('tick', this._timer);
-    this.time.set(new Date());
-
-  }.bind(this)), this.interval);
+  this._tick();
 };
+
+Timer.prototype._scheduleTick = function(interval) {
+  this._timer = Meteor.setTimeout(this._tick.bind(this), interval);
+}
+
+Timer.prototype._tick = function() {
+  this._scheduleTick(this.interval);
+  this.time.set(new Date());
+}
+
+Timer.prototype._clearTimeout = function() {
+  if (this._timer)
+    Meteor.clearTimeout(this._timer);
+  this._timer = null;
+}
 
 Timer.prototype.stop = function() {
-  //console.log('stopping timer');
-  clearInterval(this._timer);
-  this._timer = null;
-};
+  this._clearTimeout();
+}
+
+// Not reactive
+Timer.prototype.isActive = function() {
+  return !!this._timer;
+}
+
+// Reset the timer's interval
+// Maintains start/stop state
+Timer.prototype.setInterval = function(interval) {
+  this.interval = interval;
+
+  // If we're running, smoothly change timer
+  if (this.time.curVal && this.isActive()) {
+    this._clearTimeout();
+    var passedTime = (+new Date) - (+this.time.curVal)
+
+    // Don't want negatives
+    var nextTick = Math.max(interval - passedTime, 0);
+    this._scheduleTick(nextTick);
+  }
+}
+
+// Shorthand to simply depend on the timer
+Timer.prototype.dep = function() {
+  this.time.get();
+}
+
 
 function liveUpdate(interval) {
   // get current reactive context
@@ -63,7 +96,7 @@ function liveUpdate(interval) {
 function liveMoment(/* arguments */) {
   // only reactively re-run liveMoment when moment is available
   if (!moment) return;
-  
+
   liveUpdate();
   return moment.apply(null, arguments);
 }
@@ -82,10 +115,10 @@ Chronos = {
   Timer : Timer,
 
   // handy util func for making reactive contexts live updating in time
-  // usage: simply call Chronos.liveUpdate() in your helper to make it execute 
+  // usage: simply call Chronos.liveUpdate() in your helper to make it execute
   // every interval
   liveUpdate : liveUpdate,
-  
+
   // wrapper for moment.js
   // example usage: Chronos.liveMoment(someTimestamp).fromNow();
   liveMoment: liveMoment,
